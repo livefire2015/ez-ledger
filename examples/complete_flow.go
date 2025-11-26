@@ -205,15 +205,15 @@ func main() {
 	}
 
 	fmt.Printf("\nTenant: %s\n", tenantID)
-	fmt.Printf("Report Generated: %s\n\n", report.ReportGeneratedAt.Format(time.RFC1150))
+	fmt.Printf("Report Generated: %s\n\n", report.ReportGeneratedAt.Format(time.RFC1123))
 
 	fmt.Printf("STATEMENT LEDGER:\n")
 	fmt.Printf("  Current Balance: $%.2f\n", report.StatementBalance)
-	fmt.Printf("  Last Activity: %s\n\n", report.LastStatementActivity.Format(time.RFC1150))
+	fmt.Printf("  Last Activity: %s\n\n", report.LastStatementActivity.Format(time.RFC1123))
 
 	fmt.Printf("POINTS LEDGER:\n")
 	fmt.Printf("  Available Points: %d points\n", report.PointsBalance)
-	fmt.Printf("  Last Activity: %s\n\n", report.LastPointsActivity.Format(time.RFC1150))
+	fmt.Printf("  Last Activity: %s\n\n", report.LastPointsActivity.Format(time.RFC1123))
 
 	fmt.Println("Summary of Activity:")
 	fmt.Println("  • Transactions: $445.50 → Earned 445 points")
