@@ -12,15 +12,22 @@ type StatementEntryType string
 
 const (
 	EntryTypeTransaction       StatementEntryType = "transaction"
-	EntryTypePayment          StatementEntryType = "payment"
-	EntryTypeRefund           StatementEntryType = "refund"
-	EntryTypeReward           StatementEntryType = "reward"
-	EntryTypeReturnedReward   StatementEntryType = "returned_reward"
-	EntryTypeFeeLate          StatementEntryType = "fee_late"
-	EntryTypeFeeFailed        StatementEntryType = "fee_failed"
-	EntryTypeFeeInternational StatementEntryType = "fee_international"
-	EntryTypeAdjustment       StatementEntryType = "adjustment"
-	EntryTypeCredit           StatementEntryType = "credit"
+	EntryTypePayment           StatementEntryType = "payment"
+	EntryTypeRefund            StatementEntryType = "refund"
+	EntryTypeReward            StatementEntryType = "reward"
+	EntryTypeReturnedReward    StatementEntryType = "returned_reward"
+	EntryTypeFeeLate           StatementEntryType = "fee_late"
+	EntryTypeFeeFailed         StatementEntryType = "fee_failed"
+	EntryTypeFeeInternational  StatementEntryType = "fee_international"
+	EntryTypeFeeInterest       StatementEntryType = "fee_interest"
+	EntryTypeFeeOverLimit      StatementEntryType = "fee_over_limit"
+	EntryTypeFeeAnnual         StatementEntryType = "fee_annual"
+	EntryTypeFeeCashAdvance    StatementEntryType = "fee_cash_advance"
+	EntryTypeCashAdvance       StatementEntryType = "cash_advance"
+	EntryTypeCashbackEarned    StatementEntryType = "cashback_earned"
+	EntryTypeCashbackRedeemed  StatementEntryType = "cashback_redeemed"
+	EntryTypeAdjustment        StatementEntryType = "adjustment"
+	EntryTypeCredit            StatementEntryType = "credit"
 )
 
 // StatementLedgerEntry represents a single entry in the statement ledger
@@ -64,13 +71,17 @@ const (
 // IsDebit returns true if the entry increases the statement balance
 func (e *StatementLedgerEntry) IsDebit() bool {
 	switch e.EntryType {
-	case EntryTypeTransaction, EntryTypeFeeLate, EntryTypeFeeFailed,
-		 EntryTypeFeeInternational, EntryTypeReturnedReward:
+	case EntryTypeTransaction, EntryTypeCashAdvance,
+		EntryTypeFeeLate, EntryTypeFeeFailed, EntryTypeFeeInternational,
+		EntryTypeFeeInterest, EntryTypeFeeOverLimit, EntryTypeFeeAnnual,
+		EntryTypeFeeCashAdvance, EntryTypeReturnedReward:
 		return true
-	case EntryTypePayment, EntryTypeRefund, EntryTypeReward, EntryTypeCredit:
+	case EntryTypePayment, EntryTypeRefund, EntryTypeReward, EntryTypeCredit,
+		EntryTypeCashbackRedeemed:
 		return false
-	case EntryTypeAdjustment:
-		// Adjustments can be either debit or credit based on amount sign
+	case EntryTypeAdjustment, EntryTypeCashbackEarned:
+		// Adjustments and cashback earned can be either debit or credit based on amount sign
+		// Cashback earned is typically positive (credit to account) but tracked as earned
 		return e.Amount.IsPositive()
 	default:
 		return false
