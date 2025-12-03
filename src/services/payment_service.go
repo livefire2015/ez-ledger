@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -12,12 +13,12 @@ import (
 
 // PaymentService handles payment processing, tracking, and status management
 type PaymentService struct {
-	ledgerService *LedgerService
+	ledgerService *StatementLedgerService
 	feeService    *FeeService
 }
 
 // NewPaymentService creates a new payment service
-func NewPaymentService(ledgerService *LedgerService, feeService *FeeService) *PaymentService {
+func NewPaymentService(ledgerService *StatementLedgerService, feeService *FeeService) *PaymentService {
 	return &PaymentService{
 		ledgerService: ledgerService,
 		feeService:    feeService,
@@ -162,17 +163,15 @@ func (s *PaymentService) ClearPayment(payment *models.Payment, card *models.Cred
 	var ledgerEntry *models.StatementLedgerEntry
 	if s.ledgerService != nil {
 		entry := &models.StatementLedgerEntry{
-			ID:              uuid.New(),
-			TenantID:        payment.TenantID,
-			AccountID:       payment.CreditCardID,
-			EntryType:       models.EntryTypePayment,
-			EntryDate:       now,
-			EffectiveDate:   payment.EffectiveDate,
-			Amount:          payment.AppliedAmount,
-			Currency:        payment.Currency,
-			Description:     fmt.Sprintf("Payment - %s", payment.PaymentNumber),
-			ReferenceNumber: &payment.PaymentNumber,
-			CreatedAt:       now,
+			ID:          uuid.New(),
+			TenantID:    payment.TenantID,
+			EntryType:   models.EntryTypePayment,
+			EntryDate:   now,
+			PostingDate: payment.EffectiveDate,
+			Amount:      payment.AppliedAmount,
+			Description: fmt.Sprintf("Payment - %s", payment.PaymentNumber),
+			ReferenceID: &payment.PaymentNumber,
+			CreatedAt:   now,
 		}
 		ledgerEntry = entry
 	}
@@ -251,8 +250,8 @@ func (s *PaymentService) ReturnPayment(payment *models.Payment, card *models.Cre
 		TransitionAt: now,
 		TriggeredBy:  strPtr("processor"),
 		Metadata: map[string]interface{}{
-			"return_code": codeStr,
-			"description": desc,
+			"return_code":     codeStr,
+			"description":     desc,
 			"is_hard_failure": returnCode.IsHardFailure(),
 		},
 	}
@@ -261,17 +260,15 @@ func (s *PaymentService) ReturnPayment(payment *models.Payment, card *models.Cre
 	var ledgerEntry *models.StatementLedgerEntry
 	if s.ledgerService != nil {
 		entry := &models.StatementLedgerEntry{
-			ID:              uuid.New(),
-			TenantID:        payment.TenantID,
-			AccountID:       payment.CreditCardID,
-			EntryType:       models.EntryTypeAdjustment,
-			EntryDate:       now,
-			EffectiveDate:   now,
-			Amount:          payment.AppliedAmount.Neg(), // Negative to reverse
-			Currency:        payment.Currency,
-			Description:     fmt.Sprintf("Payment Returned - %s: %s", codeStr, desc),
-			ReferenceNumber: &payment.PaymentNumber,
-			CreatedAt:       now,
+			ID:          uuid.New(),
+			TenantID:    payment.TenantID,
+			EntryType:   models.EntryTypeAdjustment,
+			EntryDate:   now,
+			PostingDate: now,
+			Amount:      payment.AppliedAmount.Neg(), // Negative to reverse
+			Description: fmt.Sprintf("Payment Returned - %s: %s", codeStr, desc),
+			ReferenceID: &payment.PaymentNumber,
+			CreatedAt:   now,
 		}
 		ledgerEntry = entry
 	}
@@ -347,17 +344,15 @@ func (s *PaymentService) ReversePayment(payment *models.Payment, reason string, 
 	var ledgerEntry *models.StatementLedgerEntry
 	if s.ledgerService != nil {
 		entry := &models.StatementLedgerEntry{
-			ID:              uuid.New(),
-			TenantID:        payment.TenantID,
-			AccountID:       payment.CreditCardID,
-			EntryType:       models.EntryTypeAdjustment,
-			EntryDate:       now,
-			EffectiveDate:   now,
-			Amount:          payment.AppliedAmount.Neg(), // Negative to reverse
-			Currency:        payment.Currency,
-			Description:     fmt.Sprintf("Payment Reversal - %s: %s", payment.PaymentNumber, reason),
-			ReferenceNumber: &payment.PaymentNumber,
-			CreatedAt:       now,
+			ID:          uuid.New(),
+			TenantID:    payment.TenantID,
+			EntryType:   models.EntryTypeAdjustment,
+			EntryDate:   now,
+			PostingDate: now,
+			Amount:      payment.AppliedAmount.Neg(), // Negative to reverse
+			Description: fmt.Sprintf("Payment Reversal - %s: %s", payment.PaymentNumber, reason),
+			ReferenceID: &payment.PaymentNumber,
+			CreatedAt:   now,
 		}
 		ledgerEntry = entry
 	}
@@ -408,7 +403,7 @@ func (s *PaymentService) RetryPayment(payment *models.Payment) (*PaymentResult, 
 }
 
 // AssessFailedPaymentFee assesses a failed payment fee when applicable
-func (s *PaymentService) AssessFailedPaymentFee(payment *models.Payment, card *models.CreditCard) (*models.StatementLedgerEntry, error) {
+func (s *PaymentService) AssessFailedPaymentFee(ctx context.Context, payment *models.Payment, card *models.CreditCard) (*FeeAssessmentResult, error) {
 	if payment.Status != models.PaymentStatusFailed && payment.Status != models.PaymentStatusReturned {
 		return nil, errors.New("can only assess fee for failed or returned payments")
 	}
@@ -417,7 +412,20 @@ func (s *PaymentService) AssessFailedPaymentFee(payment *models.Payment, card *m
 		return nil, errors.New("fee service not configured")
 	}
 
-	return s.feeService.AssessFailedPaymentFee(card, payment.PaymentNumber)
+	req := FailedPaymentFeeRequest{
+		CreditCard:    card,
+		PaymentAmount: payment.Amount,
+		PaymentDate:   time.Now(),
+		FailureReason: "Payment Failed",
+		PaymentMethod: string(payment.PaymentMethod),
+		ReferenceID:   payment.PaymentNumber,
+	}
+
+	if payment.StatusReason != nil {
+		req.FailureReason = *payment.StatusReason
+	}
+
+	return s.feeService.AssessFailedPaymentFee(ctx, req)
 }
 
 // GetPaymentHistory returns the status transition history for a payment
