@@ -120,11 +120,11 @@ type CCTransactionRequest struct {
 
 // TransactionResult contains the results of processing a transaction
 type TransactionResult struct {
-	TransactionEntry     *models.StatementLedgerEntry
-	InternationalFee     *FeeAssessmentResult
-	CashbackEntry        *models.CashbackLedgerEntry
-	NewBalance           decimal.Decimal
-	AvailableCredit      decimal.Decimal
+	TransactionEntry *models.StatementLedgerEntry
+	InternationalFee *FeeAssessmentResult
+	CashbackEntry    *models.CashbackLedgerEntry
+	NewBalance       decimal.Decimal
+	AvailableCredit  decimal.Decimal
 }
 
 // RecordTransaction records a purchase transaction on the credit card
@@ -281,8 +281,8 @@ func (s *CreditCardService) RecordCashAdvance(
 		ReferenceID: &req.ReferenceID,
 		Status:      models.EntryStatusPending,
 		Metadata: map[string]interface{}{
-			"atm_location":      req.ATMLocation,
-			"cash_advance_apr":  req.CreditCard.CashAdvanceAPR.String(),
+			"atm_location":     req.ATMLocation,
+			"cash_advance_apr": req.CreditCard.CashAdvanceAPR.String(),
 		},
 		CreatedAt: time.Now(),
 	}
@@ -338,8 +338,8 @@ type CCPaymentRequest struct {
 	Description   string
 }
 
-// PaymentResult contains the result of processing a payment
-type PaymentResult struct {
+// CCPaymentResult contains the result of processing a payment
+type CCPaymentResult struct {
 	PaymentEntry    *models.StatementLedgerEntry
 	NewBalance      decimal.Decimal
 	AvailableCredit decimal.Decimal
@@ -350,14 +350,14 @@ type PaymentResult struct {
 func (s *CreditCardService) RecordPayment(
 	ctx context.Context,
 	req CCPaymentRequest,
-) (*PaymentResult, error) {
+) (*CCPaymentResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	result := &PaymentResult{}
+	result := &CCPaymentResult{}
 
 	// Create payment entry
 	paymentEntry := &models.StatementLedgerEntry{
@@ -409,10 +409,10 @@ func (s *CreditCardService) RecordPayment(
 
 // FailedPaymentRequest contains parameters for recording a failed payment
 type FailedPaymentRequest struct {
-	CreditCard       *models.CreditCard
-	OriginalPayment  *models.StatementLedgerEntry
-	FailureReason    string
-	FailureDate      time.Time
+	CreditCard      *models.CreditCard
+	OriginalPayment *models.StatementLedgerEntry
+	FailureReason   string
+	FailureDate     time.Time
 }
 
 // FailedPaymentResult contains the result of processing a failed payment
@@ -506,10 +506,10 @@ type CCRefundRequest struct {
 
 // RefundResult contains the result of processing a refund
 type RefundResult struct {
-	RefundEntry      *models.StatementLedgerEntry
-	CashbackAdjust   *models.CashbackLedgerEntry
-	NewBalance       decimal.Decimal
-	AvailableCredit  decimal.Decimal
+	RefundEntry     *models.StatementLedgerEntry
+	CashbackAdjust  *models.CashbackLedgerEntry
+	NewBalance      decimal.Decimal
+	AvailableCredit decimal.Decimal
 }
 
 // RecordRefund records a merchant refund/credit
@@ -587,12 +587,12 @@ func (s *CreditCardService) RecordRefund(
 
 // AdjustmentRequest contains parameters for a manual adjustment
 type AdjustmentRequest struct {
-	CreditCard      *models.CreditCard
-	Amount          decimal.Decimal // Positive = charge, Negative = credit
-	AdjustmentDate  time.Time
-	Reason          string
-	ApprovedBy      string
-	ReferenceID     string
+	CreditCard     *models.CreditCard
+	Amount         decimal.Decimal // Positive = charge, Negative = credit
+	AdjustmentDate time.Time
+	Reason         string
+	ApprovedBy     string
+	ReferenceID    string
 }
 
 // RecordAdjustment records a manual adjustment (credit or debit)
