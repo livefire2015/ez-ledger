@@ -1,211 +1,412 @@
-# Ledger Reconciliation Flows
+# Credit Card Ledger Reconciliation Flows
 
-This document visualizes how the Statement and Points ledgers interact for different types of activities.
+This document visualizes how the Statement and Cashback ledgers interact for different types of credit card activities.
 
 ## Visual Notation
 
 ```
 [S] = Statement Ledger
-[P] = Points Ledger
+[C] = Cashback Ledger
 →   = Creates entry
 ✗   = No entry created
+⚡  = Atomic transaction (both or neither)
 ```
 
-## Flow 1: Transaction (Purchase)
+---
 
-**Scenario**: Tenant makes a $100 purchase
+## Flow 1: Purchase Transaction (Earns Cashback)
+
+**Scenario**: Cardholder makes a $100 purchase at Amazon
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ INPUT: Transaction $100                                          │
+│ INPUT: Purchase Transaction $100                                │
+│ Merchant: Amazon.com | MCC: 5999                                │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Reconciliation Service        │
+                │  Credit Card Service           │
                 │  RecordTransaction()           │
+                │  ⚡ Atomic Transaction          │
                 └────────┬──────────────┬────────┘
                          │              │
          ┌───────────────▼──┐      ┌───▼──────────────────┐
-         │ Statement Ledger │      │ Points Ledger        │
+         │ Statement Ledger │      │ Cashback Ledger      │
          └──────────────────┘      └──────────────────────┘
 
-STATEMENT LEDGER [S]                 POINTS LEDGER [P]
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
 ┌─────────────────────┐              ┌──────────────────────┐
 │ Entry Type:         │              │ Entry Type:          │
 │   transaction       │              │   earned_transaction │
 │ Amount: +$100.00    │              │ Points: +100         │
 │ Status: pending     │              │ Linked: statement_id │
 │ Description:        │              │ Transaction: $100    │
-│   "Purchase at..."  │              │ Rate: 0.01           │
+│   "Amazon.com"      │              │ Rate: 0.01 (1%)      │
+│ Merchant: Amazon    │              │ Category: general    │
+│ MCC: 5999           │              │                      │
 └─────────────────────┘              └──────────────────────┘
+
+CREDIT CARD UPDATE:
+  Available Credit: $1000 → $900 (decreased by $100)
 
 RESULT:
   Statement Balance: +$100.00
-  Points Balance: +100 points
+  Cashback Balance: +100 points
+  Available Credit: $900
   Both entries linked via foreign key
 ```
 
 ---
 
-## Flow 2: Payment
+## Flow 2: Payment (No Cashback Impact)
 
-**Scenario**: Tenant pays $100 towards their balance
+**Scenario**: Cardholder pays $100 towards their balance
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ INPUT: Payment $100                                              │
+│ Method: ACH | Reference: PMT-12345                              │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Reconciliation Service        │
-                │  RecordPayment()               │
+                │  Payment Service               │
+                │  ProcessPayment()              │
+                │  States: pending → processing  │
+                │         → cleared              │
                 └────────┬───────────────────────┘
                          │
          ┌───────────────▼──┐
          │ Statement Ledger │
          └──────────────────┘
 
-STATEMENT LEDGER [S]                 POINTS LEDGER [P]
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
 ┌─────────────────────┐              ┌──────────────────────┐
 │ Entry Type:         │              │                      │
 │   payment           │              │   NO ENTRY ✗         │
 │ Amount: $100.00     │              │                      │
-│ Status: pending     │              │                      │
+│ Status: cleared     │              │                      │
 │ Description:        │              │                      │
-│   "Payment..."      │              │                      │
+│   "Payment PMT..."  │              │                      │
+│ Reference: PMT-123  │              │                      │
 └─────────────────────┘              └──────────────────────┘
+
+CREDIT CARD UPDATE:
+  Available Credit: $900 → $1000 (increased by $100)
 
 RESULT:
   Statement Balance: -$100.00 (credit applied)
-  Points Balance: UNCHANGED
+  Cashback Balance: UNCHANGED
+  Available Credit: $1000
 
-KEY INSIGHT: Payments only affect statement ledger, NOT points!
+⚠️  KEY INSIGHT: Payments only affect statement ledger, NOT cashback!
+    You earn points when SPENDING, not when PAYING your bill.
 ```
 
 ---
 
-## Flow 3: Refund
+## Flow 3: Refund (Adjusts Both Ledgers)
 
-**Scenario**: Tenant returns a $50 item (originally earned 50 points)
+**Scenario**: Cardholder returns a $50 item (originally earned 50 points)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ INPUT: Refund $50 (original transaction earned 50 points)       │
+│ INPUT: Refund $50                                                │
+│ Original transaction earned 50 points                           │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Reconciliation Service        │
+                │  Credit Card Service           │
                 │  RecordRefund()                │
+                │  ⚡ Atomic Transaction          │
                 └────────┬──────────────┬────────┘
                          │              │
          ┌───────────────▼──┐      ┌───▼──────────────────┐
-         │ Statement Ledger │      │ Points Ledger        │
+         │ Statement Ledger │      │ Cashback Ledger      │
          └──────────────────┘      └──────────────────────┘
 
-STATEMENT LEDGER [S]                 POINTS LEDGER [P]
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
 ┌─────────────────────┐              ┌──────────────────────┐
 │ Entry Type:         │              │ Entry Type:          │
-│   refund            │              │   earned_refund      │
+│   refund            │              │   adjusted_refund    │
 │ Amount: $50.00      │              │ Points: -50          │
 │ Status: pending     │              │ Linked: statement_id │
 │ Description:        │              │ Transaction: $50     │
 │   "Refund for..."   │              │ Rate: 0.01           │
+│ Original Txn ID     │              │ Reason: refund       │
 └─────────────────────┘              └──────────────────────┘
+
+CREDIT CARD UPDATE:
+  Available Credit: $900 → $950 (increased by $50)
 
 RESULT:
   Statement Balance: -$50.00 (credit applied)
-  Points Balance: -50 points (deducted)
+  Cashback Balance: -50 points (deducted)
+  Available Credit: $950
   Both ledgers adjusted proportionally
 ```
 
 ---
 
-## Flow 4: Points Redemption for Statement Credit
+## Flow 4: Cashback Redemption for Statement Credit
 
-**Scenario**: Tenant redeems 1000 points for $10 statement credit
+**Scenario**: Cardholder redeems 1000 points for $10 statement credit
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ INPUT: Redeem 1000 points → $10 credit                          │
+│ Redemption Type: Statement Credit                               │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Reconciliation Service        │
-                │  RecordRewardRedemption()      │
+                │  Cashback Service              │
+                │  RedeemCashback()              │
                 │  1. Validate points balance    │
                 │  2. Create both entries        │
+                │  ⚡ Atomic Transaction          │
                 └────────┬──────────────┬────────┘
                          │              │
          ┌───────────────▼──┐      ┌───▼──────────────────┐
-         │ Statement Ledger │      │ Points Ledger        │
+         │ Cashback Ledger  │      │ Statement Ledger     │
          └──────────────────┘      └──────────────────────┘
 
-POINTS LEDGER [P]                    STATEMENT LEDGER [S]
+CASHBACK LEDGER [C]                  STATEMENT LEDGER [S]
 ┌──────────────────────┐              ┌─────────────────────┐
 │ Entry Type:          │              │ Entry Type:         │
-│   redeemed_spent     │◄─────link────┤   reward            │
+│   redeemed_spent     │◄─────link────┤   credit            │
 │ Points: -1000        │              │ Amount: $10.00      │
-│ Platform: keystone   │              │ Status: pending     │
-│ External Ref: XXX    │              │ Description:        │
-│                      │              │   "Reward: 1000pts" │
+│ Description:         │              │ Status: pending     │
+│   "Redeemed for..."  │              │ Description:        │
+│                      │              │   "Cashback: 1000"  │
 └──────────────────────┘              └─────────────────────┘
 
+CREDIT CARD UPDATE:
+  Available Credit: $950 → $960 (increased by $10)
+
 RESULT:
-  Points Balance: -1000 points (deducted)
+  Cashback Balance: -1000 points (deducted)
   Statement Balance: -$10.00 (credit applied)
+  Available Credit: $960
   Cross-ledger transaction (points → money)
 ```
 
 ---
 
-## Flow 5: Fee Assessment
+## Flow 5: Interest Charge (Statement Only)
 
-**Scenario**: Late payment fee of $25 assessed
+**Scenario**: Monthly interest of $15.50 charged based on Average Daily Balance
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ INPUT: Late Fee $25                                              │
+│ INPUT: Calculate Interest for Billing Cycle                     │
+│ ADB: $1100 | APR: 18.25% | Days: 30                            │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Statement Ledger Service      │
-                │  CreateEntry()                 │
+                │  Interest Service              │
+                │  CalculateInterest()           │
+                │  Method: Average Daily Balance │
+                │  Interest = ADB × DPR × Days   │
                 └────────┬───────────────────────┘
                          │
          ┌───────────────▼──┐
          │ Statement Ledger │
          └──────────────────┘
 
-STATEMENT LEDGER [S]                 POINTS LEDGER [P]
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
+┌─────────────────────┐              ┌──────────────────────┐
+│ Entry Type:         │              │                      │
+│   fee_interest      │              │   NO ENTRY ✗         │
+│ Amount: +$15.50     │              │                      │
+│ Status: pending     │              │                      │
+│ Description:        │              │                      │
+│   "Interest charge" │              │                      │
+│ Metadata:           │              │                      │
+│   APR: 18.25%       │              │                      │
+│   ADB: $1100        │              │                      │
+│   DPR: 0.05%        │              │                      │
+│   Days: 30          │              │                      │
+└─────────────────────┘              └──────────────────────┘
+
+CREDIT CARD UPDATE:
+  Available Credit: $960 → $944.50 (decreased by $15.50)
+
+RESULT:
+  Statement Balance: +$15.50 (charge added)
+  Cashback Balance: UNCHANGED
+  Available Credit: $944.50
+  Interest charges don't earn cashback
+```
+
+---
+
+## Flow 6: Late Payment Fee (Statement Only)
+
+**Scenario**: Late payment fee of $35 assessed (payment overdue by 5 days)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ INPUT: Late Fee $35                                              │
+│ Reason: Minimum payment not received by due date                │
+│ Days Overdue: 5                                                  │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                ┌───────────────▼────────────────┐
+                │  Fee Service                   │
+                │  AssessLatePaymentFee()        │
+                └────────┬───────────────────────┘
+                         │
+         ┌───────────────▼──┐
+         │ Statement Ledger │
+         └──────────────────┘
+
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
 ┌─────────────────────┐              ┌──────────────────────┐
 │ Entry Type:         │              │                      │
 │   fee_late          │              │   NO ENTRY ✗         │
+│ Amount: +$35.00     │              │                      │
+│ Status: pending     │              │                      │
+│ Description:        │              │                      │
+│   "Late fee - 5..."  │              │                      │
+│ Metadata:           │              │                      │
+│   days_overdue: 5   │              │                      │
+│   billing_cycle_id  │              │                      │
+└─────────────────────┘              └──────────────────────┘
+
+CREDIT CARD UPDATE:
+  Available Credit: $944.50 → $909.50 (decreased by $35)
+
+RESULT:
+  Statement Balance: +$35.00 (charge added)
+  Cashback Balance: UNCHANGED
+  Available Credit: $909.50
+  Fees don't earn cashback
+```
+
+---
+
+## Flow 7: Cash Advance (No Cashback)
+
+**Scenario**: Cardholder withdraws $200 cash from ATM
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ INPUT: Cash Advance $200                                         │
+│ ATM Location: "Chase Bank ATM #1234"                            │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                ┌───────────────▼────────────────┐
+                │  Credit Card Service           │
+                │  RecordCashAdvance()           │
+                │  1. Create cash advance entry  │
+                │  2. Assess cash advance fee    │
+                └────────┬───────────────────────┘
+                         │
+         ┌───────────────▼──┐
+         │ Statement Ledger │
+         └──────────────────┘
+
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
+┌─────────────────────┐              ┌──────────────────────┐
+│ Entry 1:            │              │                      │
+│   cash_advance      │              │   NO ENTRY ✗         │
+│ Amount: +$200.00    │              │                      │
+│ Status: pending     │              │                      │
+│ Description:        │              │                      │
+│   "Cash advance..." │              │                      │
+├─────────────────────┤              │                      │
+│ Entry 2:            │              │                      │
+│   fee_cash_advance  │              │                      │
+│ Amount: +$10.00     │              │                      │
+│ Status: pending     │              │                      │
+│ Description:        │              │                      │
+│   "Cash adv fee..." │              │                      │
+└─────────────────────┘              └──────────────────────┘
+
+CREDIT CARD UPDATE:
+  Available Credit: $909.50 → $699.50 (decreased by $210)
+
+RESULT:
+  Statement Balance: +$210.00 ($200 + $10 fee)
+  Cashback Balance: UNCHANGED
+  Available Credit: $699.50
+  Cash advances don't earn cashback
+  Higher APR applies (no grace period)
+```
+
+---
+
+## Flow 8: Failed Payment (Fee Assessment)
+
+**Scenario**: Payment of $100 fails (NSF), failed payment fee assessed
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ INPUT: Payment $100 FAILED                                       │
+│ Reason: Insufficient Funds (NSF)                                │
+│ ACH Return Code: R01                                            │
+└───────────────────────────────┬──────────────────────────────────┘
+                                │
+                ┌───────────────▼────────────────┐
+                │  Payment Service               │
+                │  1. Update payment status      │
+                │  2. Assess failed payment fee  │
+                └────────┬───────────────────────┘
+                         │
+         ┌───────────────▼──┐
+         │ Statement Ledger │
+         └──────────────────┘
+
+STATEMENT LEDGER [S]                 CASHBACK LEDGER [C]
+┌─────────────────────┐              ┌──────────────────────┐
+│ Entry 1:            │              │                      │
+│   payment           │              │   NO ENTRY ✗         │
+│ Amount: $100.00     │              │                      │
+│ Status: returned    │              │                      │
+│ (original payment)  │              │                      │
+├─────────────────────┤              │                      │
+│ Entry 2:            │              │                      │
+│   adjustment        │              │                      │
+│ Amount: +$100.00    │              │                      │
+│ Status: cleared     │              │                      │
+│ (reversal)          │              │                      │
+├─────────────────────┤              │                      │
+│ Entry 3:            │              │                      │
+│   fee_failed        │              │                      │
 │ Amount: +$25.00     │              │                      │
 │ Status: pending     │              │                      │
 │ Description:        │              │                      │
-│   "Late fee..."     │              │                      │
+│   "Failed payment"  │              │                      │
 └─────────────────────┘              └──────────────────────┘
 
+CREDIT CARD UPDATE:
+  Available Credit: $699.50 → $574.50 (decreased by $125)
+
 RESULT:
-  Statement Balance: +$25.00 (charge added)
-  Points Balance: UNCHANGED
-  Fees don't earn points
+  Statement Balance: +$125.00 ($100 reversed + $25 fee)
+  Cashback Balance: UNCHANGED
+  Available Credit: $574.50
+  Payment state: pending → processing → cleared → returned
 ```
 
 ---
 
 ## Reconciliation Matrix
 
-| Activity Type | Statement Impact | Points Impact | Reconciliation Required |
-|---------------|------------------|---------------|------------------------|
-| **Transaction** | Charge (+) | Earn (+) | ✓ Yes (atomic) |
-| **Payment** | Credit (-) | None | ✗ No |
-| **Refund** | Credit (-) | Deduct (-) | ✓ Yes (atomic) |
-| **Points Redemption** | Credit (-) | Deduct (-) | ✓ Yes (atomic) |
-| **Late Fee** | Charge (+) | None | ✗ No |
-| **Failed Payment Fee** | Charge (+) | None | ✗ No |
-| **Manual Adjustment** | +/- | Optional | Maybe |
-| **Account Credit** | Credit (-) | None | ✗ No |
+| Activity Type | Statement Impact | Cashback Impact | Atomic? | Notes |
+|---------------|------------------|-----------------|---------|-------|
+| **Purchase** | Charge (+) | Earn (+) | ✓ Yes | Standard transaction |
+| **Payment** | Credit (-) | None | ✗ No | Paying bill doesn't earn points |
+| **Refund** | Credit (-) | Deduct (-) | ✓ Yes | Reverses original earning |
+| **Cash Advance** | Charge (+) | None | ✗ No | No grace period, higher APR |
+| **Cashback Redemption** | Credit (-) | Deduct (-) | ✓ Yes | Points → Statement credit |
+| **Interest** | Charge (+) | None | ✗ No | Based on ADB calculation |
+| **Late Fee** | Charge (+) | None | ✗ No | Assessed if payment overdue |
+| **Failed Payment Fee** | Charge (+) | None | ✗ No | Payment returned/failed |
+| **International Fee** | Charge (+) | None | ✗ No | % of foreign transaction |
+| **Cash Advance Fee** | Charge (+) | None | ✗ No | Flat fee or % of advance |
+| **Annual Fee** | Charge (+) | None | ✗ No | Yearly membership fee |
+| **Manual Adjustment** | +/- | Optional | Maybe | Requires approval |
+| **Fee Waiver** | Credit (-) | None | ✗ No | Reverses previously assessed fee |
 
 ---
 
@@ -216,23 +417,45 @@ All reconciliation operations that affect both ledgers use database transactions
 ```go
 BEGIN TRANSACTION
 
-  1. Validate business rules (e.g., sufficient points)
-  2. Create statement ledger entry
-  3. Create points ledger entry (if applicable)
-  4. Link entries via foreign keys
+  // Step 1: Validate business rules
+  if err := ValidateBusinessRules(); err != nil {
+      ROLLBACK
+      return err
+  }
 
-  IF any step fails:
-    ROLLBACK entire transaction
-  ELSE:
-    COMMIT both entries atomically
+  // Step 2: Create statement ledger entry
+  statementEntry, err := CreateStatementEntry(...)
+  if err != nil {
+      ROLLBACK
+      return err
+  }
+
+  // Step 3: Create cashback ledger entry (if applicable)
+  if shouldEarnCashback {
+      cashbackEntry, err := CreateCashbackEntry(...)
+      if err != nil {
+          ROLLBACK  // Rolls back statement entry too
+          return err
+      }
+  }
+
+  // Step 4: Update credit card (available credit)
+  err = UpdateAvailableCredit(...)
+  if err != nil {
+      ROLLBACK  // Rolls back all entries
+      return err
+  }
+
+  COMMIT  // All or nothing
 
 END TRANSACTION
 ```
 
 This ensures:
 - **Consistency**: Both ledgers always stay in sync
-- **Atomicity**: Either both entries are created or neither is
+- **Atomicity**: Either all entries are created or none are
 - **Integrity**: No orphaned entries or inconsistent states
+- **Isolation**: Concurrent transactions don't interfere
 
 ---
 
@@ -241,35 +464,58 @@ This ensures:
 ### Statement Balance
 
 ```
+current_balance = 0
+
 FOR each cleared entry WHERE tenant_id = X:
-  IF entry_type IN (transaction, fee_*, returned_reward, adjustment[+]):
-    balance += amount
-  ELSE IF entry_type IN (payment, refund, reward, credit, adjustment[-]):
-    balance -= amount
+  SWITCH entry_type:
+    CASE transaction, cash_advance:
+      current_balance += amount
+    
+    CASE fee_late, fee_failed, fee_international, 
+         fee_interest, fee_cash_advance, fee_annual, 
+         fee_over_limit:
+      current_balance += amount
+    
+    CASE payment, refund, credit:
+      current_balance -= amount
+    
+    CASE adjustment:
+      current_balance += amount  // Can be positive or negative
 
-RETURN balance
+RETURN current_balance
 ```
 
-### Points Balance
+### Cashback Balance
 
 ```
-earned_points = 0
-redeemed_points = 0
+available_points = 0
 
-FOR each entry WHERE tenant_id = X:
-  IF entry_type = earned_transaction:
-    earned_points += points
-  ELSE IF entry_type = earned_refund:
-    earned_points += points  // Note: points is negative for refunds
-  ELSE IF entry_type = redeemed_spent:
-    redeemed_points += ABS(points)
-  ELSE IF entry_type = redeemed_cancelled:
-    redeemed_points -= ABS(points)
-  ELSE IF entry_type = redeemed_refunded:
-    redeemed_points -= ABS(points)
+FOR each entry WHERE credit_card_id = X:
+  SWITCH entry_type:
+    CASE earned_transaction:
+      available_points += points
+    
+    CASE adjusted_refund:
+      available_points += points  // Note: points is negative for refunds
+    
+    CASE redeemed_spent, redeemed_external:
+      available_points += points  // Note: points is negative for redemptions
+    
+    CASE adjusted_manual:
+      available_points += points  // Can be positive or negative
+    
+    CASE expired:
+      available_points += points  // Note: points is negative for expirations
 
-available_points = earned_points - redeemed_points
 RETURN available_points
+```
+
+### Available Credit
+
+```
+available_credit = credit_limit - current_balance
+
+// Can be negative if over limit
 ```
 
 ---
@@ -280,11 +526,11 @@ RETURN available_points
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ INPUT: Redeem 5000 points (but tenant only has 1000)            │
+│ INPUT: Redeem 5000 points (but cardholder only has 1000)       │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Reconciliation Service        │
+                │  Cashback Service              │
                 │  1. Check points balance       │
                 │  2. Available: 1000 < 5000     │
                 │  3. REJECT ✗                   │
@@ -296,26 +542,25 @@ RESULT: Error returned
 NO entries created in either ledger
 ```
 
-### Payment Processing Failure
+### Insufficient Credit Example
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ INPUT: Payment $100                                              │
+│ INPUT: Purchase $500 (but available credit is $400)            │
 └───────────────────────────────┬──────────────────────────────────┘
                                 │
                 ┌───────────────▼────────────────┐
-                │  Statement Ledger Service      │
-                │  1. Create entry (pending)     │
-                │  2. External payment fails     │
-                │  3. Create reversal entry      │
+                │  Credit Card Service           │
+                │  1. Check available credit     │
+                │  2. Available: $400 < $500     │
+                │  3. REJECT ✗                   │
                 └────────────────────────────────┘
 
-STATEMENT LEDGER:
-  Entry 1: payment, $100, status=pending
-  Entry 2: adjustment, -$100, status=cleared (reversal)
+RESULT: Error returned
+  "Insufficient credit: available=$400, requested=$500"
 
-Net effect: $0 (payment cancelled)
-Points: No impact (payments never affect points)
+NO entries created
+Alternative: Assess over-limit fee and allow (if configured)
 ```
 
 ---
@@ -324,67 +569,84 @@ Points: No impact (payments never affect points)
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Generate Statement for Tenant X                    │
+│ Generate Statement for Card X                      │
 │ Period: 2025-01-01 to 2025-01-31                   │
 └────────────────────────┬────────────────────────────┘
                          │
          ┌───────────────▼────────────────┐
-         │ Statement Service              │
-         │ 1. Get previous balance        │
-         │ 2. Calculate cleared payments  │
-         │ 3. Sum all entries in period   │
-         │ 4. Generate statement          │
+         │ Billing Service                │
+         │ 1. Close current cycle         │
+         │ 2. Calculate balances          │
+         │ 3. Calculate interest          │
+         │ 4. Assess fees if needed       │
+         │ 5. Calculate minimum payment   │
+         │ 6. Set due date                │
          └────────────────────────────────┘
 
 CALCULATION:
   Previous Balance:        $500.00  (from Dec statement)
-  Cleared Payments:       -$200.00  (payments in period)
+  Payments Received:      -$200.00  (payments in period)
   ─────────────────────────────────
   Opening Balance:         $300.00
 
-  + Transactions:          $450.00
+  + Purchases:             $450.00
+  + Cash Advances:         $200.00
   - Refunds:               -$75.00
-  - Rewards (redeemed):    -$10.00
-  + Late Fees:             +$25.00
+  - Cashback Redeemed:     -$10.00
+  + Interest:              +$15.50
+  + Late Fees:             +$35.00
+  + Cash Advance Fee:      +$10.00
   ─────────────────────────────────
-  Statement Balance:       $690.00
+  New Balance:             $925.50
 
-  Minimum Payment (5%):     $34.50
+  Minimum Payment (3%):     $27.77
+  OR Minimum Amount:        $25.00
+  ─────────────────────────────────
+  Minimum Payment Due:      $27.77
+
+  Due Date: 2025-02-25 (25 days after cycle end)
+  Grace Period End: 2025-02-21
 ```
 
 ---
 
 ## Best Practices
 
-### 1. Always Use Reconciliation Service
+### 1. Always Use Service Layer
 
 ✓ **DO**:
 ```go
-reconciliationService.RecordTransaction(...)
+creditCardService.RecordTransaction(...)
+cashbackService.RedeemCashback(...)
 ```
 
 ✗ **DON'T**:
 ```go
-statementService.CreateEntry(...)  // Bypasses reconciliation
-pointsService.CreateEntry(...)     // Entries won't be linked!
+statementLedgerService.CreateEntry(...)  // Bypasses business logic
+cashbackLedgerService.CreateEntry(...)   // Entries won't be linked!
 ```
 
 ### 2. Validate Before Creating Entries
 
 ```go
-// Check points balance before redemption
-if err := pointsService.ValidateRedemption(tenantID, points); err != nil {
+// Check available credit before transaction
+if err := card.HasAvailableCredit(amount); err != nil {
     return err  // Don't create any entries
 }
 
-// Then proceed with both entries atomically
-reconciliationService.RecordRewardRedemption(...)
+// Check points balance before redemption
+if err := cashbackService.ValidateRedemption(cardID, points); err != nil {
+    return err  // Don't create any entries
+}
+
+// Then proceed with atomic operation
+result, err := creditCardService.RecordTransaction(...)
 ```
 
 ### 3. Handle Errors Properly
 
 ```go
-stmtEntry, ptsEntry, err := reconciliationService.RecordTransaction(...)
+stmtEntry, cashbackEntry, err := creditCardService.RecordTransaction(...)
 if err != nil {
     // Transaction rolled back - neither ledger affected
     log.Error("Failed to record transaction", err)
@@ -392,6 +654,9 @@ if err != nil {
 }
 
 // Success - both entries created and linked
+log.Info("Transaction recorded", 
+    "statement_id", stmtEntry.ID,
+    "cashback_id", cashbackEntry.ID)
 ```
 
 ### 4. Use Proper Entry Types
@@ -401,20 +666,77 @@ if err != nil {
 CreateEntry(type: "adjustment", amount: 100)
 
 // RIGHT: Using specific types for auditability
-RecordTransaction(...)  // For purchases
-RecordPayment(...)      // For payments
-RecordRefund(...)       // For refunds
+RecordTransaction(...)     // For purchases
+RecordPayment(...)         // For payments
+RecordRefund(...)          // For refunds
+RecordCashAdvance(...)     // For ATM withdrawals
+AssessLateFee(...)         // For late fees
+```
+
+### 5. Always Use Decimal for Currency
+
+```go
+// WRONG: Using float64 for money
+amount := 100.50  // float64
+
+// RIGHT: Using decimal.Decimal
+amount := decimal.NewFromFloat(100.50)
+```
+
+### 6. Track Payment States
+
+```go
+// Payment state machine
+payment.Status = PaymentStatusPending
+// ... process payment ...
+payment.Status = PaymentStatusProcessing
+// ... wait for processor ...
+payment.Status = PaymentStatusCleared
+
+// Handle failures
+if processorFailed {
+    payment.Status = PaymentStatusFailed
+    if payment.CanRetry() {
+        payment.NextRetryAt = time.Now().Add(24 * time.Hour)
+    }
+}
 ```
 
 ---
 
 ## Summary
 
-1. **Two Independent Ledgers**: Statement (money) and Points (rewards)
+### Key Principles
+
+1. **Two Independent Ledgers**: Statement (money) and Cashback (rewards)
 2. **Coordinated Updates**: Some activities affect both, some only one
-3. **Key Rule**: Payments DON'T affect points (only transactions do)
+3. **Critical Rule**: Payments DON'T affect cashback (only purchases do)
 4. **Atomic Reconciliation**: Both ledgers updated in single transaction
 5. **Immutable Entries**: Never update/delete, only append new entries
 6. **Real-time Balances**: Calculated from complete entry history
+7. **GAAP Compliance**: Interest calculated using Average Daily Balance
+8. **Precision**: Always use decimal.Decimal for currency
 
-The reconciliation service ensures these ledgers stay synchronized while maintaining their independence.
+### What Earns Cashback?
+
+✓ **YES**:
+- Purchase transactions
+- (Points deducted on refunds)
+
+✗ **NO**:
+- Payments
+- Cash advances
+- Fees (late, failed payment, international, etc.)
+- Interest charges
+- Manual adjustments
+
+### Reconciliation Service Responsibilities
+
+1. **Validate** business rules before creating entries
+2. **Create** entries in both ledgers atomically
+3. **Link** related entries via foreign keys
+4. **Update** credit card available credit
+5. **Rollback** all changes if any step fails
+6. **Audit** all operations with timestamps and creators
+
+The reconciliation service ensures these ledgers stay synchronized while maintaining their independence and enforcing credit card business rules.
