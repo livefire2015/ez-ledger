@@ -2,20 +2,21 @@
 
 ## Project Overview
 
-**ez-ledger** is a personal finance and accounting ledger application. This document provides essential information for AI assistants working on this codebase.
+**ez-ledger** is a comprehensive credit card ledger system implementing GAAP-compliant accounting for revolving credit card accounts with integrated cashback rewards tracking. This document provides essential information for AI assistants working on this codebase.
 
-**Status**: New project - initial setup phase
+**Status**: Active development - Core features implemented
 
 ## Table of Contents
 
 1. [Project Structure](#project-structure)
-2. [Development Workflows](#development-workflows)
-3. [Coding Conventions](#coding-conventions)
-4. [Git Workflow](#git-workflow)
-5. [Testing Strategy](#testing-strategy)
-6. [Key Concepts](#key-concepts)
-7. [Common Tasks](#common-tasks)
-8. [AI Assistant Guidelines](#ai-assistant-guidelines)
+2. [Core Features](#core-features)
+3. [Development Workflows](#development-workflows)
+4. [Coding Conventions](#coding-conventions)
+5. [Git Workflow](#git-workflow)
+6. [Testing Strategy](#testing-strategy)
+7. [Key Concepts](#key-concepts)
+8. [Common Tasks](#common-tasks)
+9. [AI Assistant Guidelines](#ai-assistant-guidelines)
 
 ---
 
@@ -24,23 +25,126 @@
 ```
 ez-ledger/
 ├── src/                    # Source code
-│   ├── core/              # Core ledger logic
-│   ├── models/            # Data models (accounts, transactions, etc.)
-│   ├── services/          # Business logic services
-│   ├── api/               # API routes/endpoints
-│   └── utils/             # Utility functions
+│   ├── models/            # Data models
+│   │   ├── billing_cycle.go       # Billing cycle management
+│   │   ├── cashback.go            # Cashback rewards
+│   │   ├── credit_card.go         # Credit card accounts
+│   │   ├── payment.go             # Payment processing
+│   │   ├── points_ledger.go       # Points tracking
+│   │   ├── statement.go           # Statement generation
+│   │   ├── statement_ledger.go    # Transaction ledger
+│   │   └── tenant.go              # Multi-tenancy
+│   └── services/          # Business logic services
+│       ├── billing_service.go              # Billing cycle management
+│       ├── cashback_service.go             # Cashback calculations
+│       ├── credit_card_service.go          # Card operations
+│       ├── fee_service.go                  # Fee assessment
+│       ├── interest_service.go             # Interest calculations
+│       ├── ledger_reconciliation_service.go # Ledger coordination
+│       ├── payment_service.go              # Payment processing
+│       ├── points_ledger_service.go        # Points tracking
+│       └── statement_ledger_service.go     # Transaction ledger
 ├── tests/                 # Test files
-│   ├── unit/             # Unit tests
-│   └── integration/      # Integration tests
+│   └── unit/             # Unit tests
 ├── docs/                  # Documentation
-├── config/                # Configuration files
-└── scripts/               # Build/deployment scripts
+│   ├── LEDGER_DESIGN.md
+│   └── RECONCILIATION_FLOWS.md
+├── migrations/            # Database migrations
+├── go.mod                 # Go dependencies
+└── README.md             # User documentation
 ```
 
-### Current State
-- **Repository**: Empty/Initial state
-- **Tech Stack**: To be determined based on requirements
-- **Database**: To be determined
+### Technology Stack
+- **Language**: Go 1.21+
+- **Database**: PostgreSQL 14+ (ACID compliance required)
+- **Key Libraries**:
+  - `github.com/shopspring/decimal` - Precise decimal arithmetic
+  - `github.com/google/uuid` - UUID generation
+  - `github.com/lib/pq` - PostgreSQL driver
+
+---
+
+## Core Features
+
+### 1. Revolving Credit Card Ledger (Main Feature)
+
+The system implements a complete revolving credit card ledger with GAAP-compliant accounting:
+
+#### Statement Ledger
+- **Immutable event sourcing**: All transactions are append-only
+- **Entry types**:
+  - `transaction` - Purchase transactions
+  - `payment` - Customer payments
+  - `refund` - Merchant refunds
+  - `cash_advance` - ATM withdrawals
+  - `fee_*` - Various fees (late, failed payment, international, etc.)
+  - `fee_interest` - Interest charges
+  - `adjustment` - Manual adjustments
+  - `credit` - Credits/waivers
+
+#### Billing Cycle Management
+- Monthly billing cycles with configurable cycle days
+- Automatic statement generation
+- Minimum payment calculation (greater of % or fixed amount)
+- Due date tracking with grace periods
+- Overdue detection and late fee assessment
+
+#### Interest Calculation
+- **GAAP-compliant Average Daily Balance (ADB) method**
+- Daily Periodic Rate (DPR) = APR / 365
+- Interest = ADB × DPR × Days in cycle
+- Grace period support (waived if previous balance paid in full)
+- Multiple APR types:
+  - Purchase APR
+  - Cash advance APR
+  - Penalty APR
+  - Introductory APR (time-limited)
+
+#### Fee Management
+- Late payment fees
+- Failed/returned payment fees
+- International transaction fees (percentage-based)
+- Cash advance fees (greater of flat fee or percentage)
+- Over-limit fees
+- Annual membership fees
+- Fee waiver capability with audit trail
+
+#### Payment Processing
+- Multiple payment states (pending, processing, cleared, failed, returned, cancelled, reversed)
+- ACH return code handling
+- Payment retry logic
+- Failed payment fee assessment
+- Payment application to balance
+
+### 2. Reward Points Ledger (Bonus Feature)
+
+Integrated cashback/points tracking system:
+
+#### Points Earning
+- Configurable earning rate (e.g., 1% = 1 point per dollar)
+- Category-based multipliers (e.g., 3x on dining)
+- Minimum transaction thresholds
+- Automatic earning on qualifying transactions
+- No points on cash advances or fees
+
+#### Points Redemption
+- Statement credit redemption
+- Minimum redemption thresholds
+- External platform integration (e.g., Keystone)
+- Redemption tracking with reference IDs
+
+#### Points Adjustments
+- Refund adjustments (deduct points when transaction refunded)
+- Manual adjustments with approval tracking
+- Expiration handling (if configured)
+
+#### Points Ledger Entries
+- `earned_transaction` - Points earned from purchases
+- `redeemed_spent` - Points redeemed for statement credit
+- `redeemed_external` - Points redeemed via external platform
+- `adjusted_refund` - Points deducted for refunds
+- `adjusted_manual` - Manual adjustments
+- `expired` - Expired points
 
 ---
 
@@ -56,28 +160,26 @@ ez-ledger/
 
 2. **Install dependencies**
    ```bash
-   # Will vary based on chosen tech stack
-   # npm install / pip install -r requirements.txt / go mod download
+   go mod download
    ```
 
-3. **Set up configuration**
+3. **Set up PostgreSQL database**
    ```bash
-   # Copy example config and customize
-   cp .env.example .env
+   createdb ezledger
+   psql ezledger < migrations/001_create_ledger_tables.sql
    ```
 
 4. **Run tests**
    ```bash
-   # Verify setup is correct
-   # npm test / pytest / go test
+   go test ./...
    ```
 
 ### Development Cycle
 
 1. Create feature branch from main
 2. Implement changes with tests
-3. Run linter and formatter
-4. Run test suite
+3. Run linter and formatter (`gofmt`, `golint`)
+4. Run test suite (`go test -v ./...`)
 5. Commit with descriptive message
 6. Push and create pull request
 
@@ -89,24 +191,24 @@ ez-ledger/
 
 - **DRY (Don't Repeat Yourself)**: Extract common logic into reusable functions
 - **SOLID Principles**: Follow object-oriented design principles
-- **Error Handling**: Always handle errors gracefully with meaningful messages
-- **Documentation**: Document complex logic and public APIs
-- **Security**: Never commit secrets, sanitize inputs, validate data
+- **Error Handling**: Always return errors, never panic in production code
+- **Documentation**: Document exported functions and complex logic
+- **Security**: Never commit secrets, validate all inputs
 
-### Naming Conventions
+### Go-Specific Conventions
 
-- **Files**: `snake_case.ext` or `kebab-case.ext` (maintain consistency)
-- **Classes**: `PascalCase`
-- **Functions/Methods**: `camelCase` or `snake_case` (language-dependent)
-- **Constants**: `UPPER_SNAKE_CASE`
-- **Variables**: `camelCase` or `snake_case` (language-dependent)
+- **Files**: `snake_case.go`
+- **Types**: `PascalCase`
+- **Functions/Methods**: `PascalCase` (exported), `camelCase` (unexported)
+- **Constants**: `PascalCase` or `UPPER_SNAKE_CASE`
+- **Variables**: `camelCase`
 
 ### Code Organization
 
-- **Single Responsibility**: Each file/class should have one clear purpose
-- **Separation of Concerns**: Keep business logic separate from presentation
-- **Dependency Injection**: Favor DI over hard-coded dependencies
-- **Configuration**: Externalize configuration, never hardcode values
+- **Single Responsibility**: Each file/struct should have one clear purpose
+- **Separation of Concerns**: Keep business logic in services, data in models
+- **Dependency Injection**: Pass dependencies explicitly (e.g., `*sql.DB`)
+- **Builder Pattern**: Use for complex object construction (see `BillingCycleBuilder`)
 
 ---
 
@@ -114,10 +216,9 @@ ez-ledger/
 
 ### Branch Naming
 
-- **Feature branches**: `feature/<description>` or `claude/<session-id>`
+- **Feature branches**: `feature/<description>`
 - **Bug fixes**: `fix/<description>`
 - **Hotfixes**: `hotfix/<description>`
-- **Releases**: `release/<version>`
 
 ### Commit Messages
 
@@ -142,18 +243,11 @@ Follow conventional commits format:
 
 **Examples**:
 ```
-feat(transactions): add support for recurring transactions
-fix(balance): correct calculation for multi-currency accounts
-docs(api): update API endpoint documentation
+feat(interest): implement GAAP-compliant ADB interest calculation
+fix(billing): correct minimum payment calculation for zero balance
+docs(readme): add detailed credit card ledger explanation
+test(interest): add unit tests for interest service
 ```
-
-### Pull Request Guidelines
-
-1. **Title**: Clear, descriptive summary
-2. **Description**: Explain what, why, and how
-3. **Tests**: Include test coverage
-4. **Documentation**: Update relevant docs
-5. **Breaking Changes**: Clearly mark any breaking changes
 
 ---
 
@@ -169,86 +263,114 @@ docs(api): update API endpoint documentation
 
 ```
 tests/
-├── unit/
-│   ├── test_accounts.{ext}
-│   ├── test_transactions.{ext}
-│   └── test_balance_calculator.{ext}
-└── integration/
-    ├── test_api_endpoints.{ext}
-    └── test_transaction_flow.{ext}
+└── unit/
+    ├── billing_cycle_test.go
+    ├── cashback_test.go
+    ├── credit_card_test.go
+    ├── payment_test.go
+    └── interest_service_test.go (in src/services/)
 ```
 
 ### Testing Best Practices
 
+- **Table-driven tests**: Use for multiple test cases
 - **Isolation**: Tests should not depend on each other
 - **Clarity**: Test names should describe what they test
-- **AAA Pattern**: Arrange, Act, Assert
-- **Mock External Dependencies**: Use mocks for databases, APIs, etc.
-- **Fast Execution**: Keep tests fast to encourage frequent running
+- **No database**: Use in-memory data structures for unit tests
+- **Decimal precision**: Test currency calculations with exact decimal values
 
 ---
 
 ## Key Concepts
 
-### Ledger Accounting Fundamentals
+### Credit Card Accounting Fundamentals
 
-1. **Double-Entry Bookkeeping**: Every transaction affects at least two accounts
-2. **Account Types**:
-   - Assets (debit increases)
-   - Liabilities (credit increases)
-   - Equity (credit increases)
-   - Income/Revenue (credit increases)
-   - Expenses (debit increases)
+1. **Revolving Credit**: 
+   - Credit limit defines maximum borrowing
+   - Available credit = Credit limit - Current balance
+   - Balance carries forward month to month if not paid in full
 
-3. **Transaction Structure**:
+2. **Billing Cycle**:
+   - Monthly statement period (e.g., 1st to 30th)
+   - Statement generated at cycle end
+   - Payment due date (typically 21-25 days after cycle end)
+   - Grace period for interest (if previous balance paid in full)
+
+3. **Interest Calculation (GAAP-compliant)**:
    ```
-   {
-     date: "YYYY-MM-DD",
-     description: "Transaction description",
-     entries: [
-       { account: "Account1", debit: amount },
-       { account: "Account2", credit: amount }
-     ]
-   }
+   Average Daily Balance (ADB) = Sum of daily balances / Days in cycle
+   Daily Periodic Rate (DPR) = APR / 365
+   Interest Charge = ADB × DPR × Days in cycle
    ```
 
-4. **Balance Equation**: Assets = Liabilities + Equity
+4. **Minimum Payment**:
+   ```
+   Minimum = MAX(
+     Balance × MinimumPaymentPercent,
+     MinimumPaymentAmount
+   )
+   ```
+
+5. **Transaction Flow**:
+   ```
+   Purchase → Pending → Posted → Included in statement → Due → Paid/Overdue
+   ```
+
+### Cashback/Rewards Fundamentals
+
+1. **Earning**:
+   - Points earned on purchases (not payments)
+   - Rate: typically 1% (1 point per dollar)
+   - Category multipliers possible
+   - No points on cash advances, fees, or interest
+
+2. **Redemption**:
+   - Statement credit (reduces balance)
+   - External platform redemption
+   - Minimum redemption threshold
+
+3. **Adjustments**:
+   - Refunds deduct previously earned points
+   - Manual adjustments require approval
 
 ### Data Integrity
 
-- **Immutability**: Once posted, transactions should be immutable (use reversals)
-- **Audit Trail**: Maintain complete history of all changes
-- **Validation**: Ensure debits = credits for each transaction
-- **Reconciliation**: Regular balance checks and reconciliation
+- **Immutability**: Once posted, entries are immutable (use reversals)
+- **Audit Trail**: Complete history with timestamps and creators
+- **Validation**: Ensure all amounts use decimal.Decimal for precision
+- **Atomicity**: Related ledger updates in single transaction
 
 ---
 
 ## Common Tasks
 
-### Adding a New Account Type
+### Adding a New Fee Type
 
-1. Define the account type in models
-2. Update account validation logic
-3. Add to account hierarchy if needed
-4. Write tests for new account type
-5. Update documentation
+1. Add constant to `models/statement_ledger.go`
+2. Create request struct in `services/fee_service.go`
+3. Implement assessment function
+4. Add to fee summary calculation
+5. Write tests
+6. Update documentation
 
-### Creating a Transaction
+### Calculating Interest for a Billing Cycle
 
-1. Validate transaction data (debits = credits)
-2. Verify all accounts exist
-3. Check permissions/authorization
-4. Create transaction record
-5. Update account balances
-6. Log audit trail
+1. Get billing cycle details
+2. Retrieve daily balances for cycle period
+3. Calculate Average Daily Balance
+4. Check grace period eligibility
+5. Apply DPR × Days calculation
+6. Apply minimum interest charge if configured
+7. Create interest fee entry
 
-### Generating Reports
+### Processing a Payment
 
-1. Define report parameters (date range, accounts, etc.)
-2. Query transactions within scope
-3. Calculate aggregates/balances
-4. Format output (JSON, PDF, CSV, etc.)
-5. Cache results if appropriate
+1. Validate payment amount
+2. Create payment record with status
+3. Create statement ledger entry
+4. Update available credit
+5. Track payment status transitions
+6. Handle failures/returns with appropriate fees
 
 ---
 
@@ -256,112 +378,109 @@ tests/
 
 ### When Working on This Codebase
 
-1. **Understand Context First**
-   - Read relevant code before making changes
-   - Understand the accounting implications
-   - Check for existing patterns to follow
+1. **Understand Financial Context**
+   - This is a credit card system, not a simple ledger
+   - Interest calculations must be GAAP-compliant
+   - Decimal precision is critical (never use float64 for money)
+   - Understand the difference between transactions and payments
 
 2. **Prioritize Data Integrity**
-   - Ledger data must be accurate and consistent
-   - Always validate transactions
-   - Maintain audit trails
-   - Never silently fail on validation errors
+   - All financial entries are immutable
+   - Use database transactions for atomic operations
+   - Validate all amounts and dates
+   - Maintain complete audit trails
 
 3. **Security Considerations**
    - Never expose sensitive financial data in logs
    - Validate and sanitize all inputs
-   - Implement proper authentication/authorization
-   - Follow principle of least privilege
+   - Use UUIDs for all IDs (prevent enumeration)
+   - Implement proper tenant isolation
 
 4. **Testing Requirements**
-   - Write tests before or alongside code
-   - Test edge cases (zero amounts, negative values, etc.)
-   - Test currency handling and precision
-   - Test date/time handling across timezones
+   - Test with realistic credit card scenarios
+   - Test edge cases (zero amounts, negative balances, etc.)
+   - Test interest calculations with known values
+   - Test payment state transitions
+   - Test fee assessments and waivers
 
 5. **Documentation Standards**
-   - Document complex calculations
-   - Explain accounting rules implemented
+   - Document complex calculations with formulas
+   - Explain GAAP compliance requirements
    - Keep API documentation current
    - Comment non-obvious business logic
 
-6. **Code Review Checklist**
-   - Does it maintain transaction integrity?
-   - Are all error cases handled?
-   - Is it properly tested?
-   - Is it documented?
-   - Does it follow existing patterns?
-
 ### Common Pitfalls to Avoid
 
-- **Floating Point Arithmetic**: Use decimal/money types for currency
-- **Timezone Issues**: Store dates in UTC, convert for display
-- **Race Conditions**: Handle concurrent transaction creation
-- **Incomplete Validation**: Always validate both debits and credits
-- **Missing Audit Logs**: Log all state changes
-- **Hardcoded Values**: Use configuration for currencies, date formats, etc.
+- **Floating Point Arithmetic**: ALWAYS use `decimal.Decimal` for currency
+- **Timezone Issues**: Store dates in UTC, use `time.Time` consistently
+- **Payment vs Transaction Confusion**: Payments reduce balance, transactions increase it
+- **Points on Payments**: Points are earned on spending, NOT on paying bills
+- **Mutable Ledger Entries**: Never update entries, always create new ones
+- **Missing Grace Period Logic**: Interest may be waived if previous balance paid in full
+- **Incorrect APR Calculation**: DPR = APR / 365 (not 360, not 12)
 
-### Code Quality Standards
+### Credit Card Specific Rules
 
-- **No Magic Numbers**: Use named constants
-- **DRY Principle**: Extract repeated logic
-- **Error Messages**: Provide actionable error messages
-- **Performance**: Consider indexing for large datasets
-- **Scalability**: Design for growing transaction volumes
+1. **Interest Grace Period**:
+   - If previous statement paid in full by due date → No interest on new purchases
+   - If carrying balance → Interest accrues from transaction date
+
+2. **Cash Advances**:
+   - No grace period (interest starts immediately)
+   - Higher APR than purchases
+   - Separate fee assessed
+
+3. **Payments Application**:
+   - Typically applied to highest APR balance first
+   - Minimum payment goes to oldest balance
+
+4. **Fee Assessment**:
+   - Late fee: Only if minimum payment not received by due date
+   - Failed payment fee: When payment returns/fails
+   - One fee per occurrence (don't double-charge)
 
 ### Before Committing
 
-- [ ] All tests pass
-- [ ] Linter/formatter run
+- [ ] All tests pass (`go test -v ./...`)
+- [ ] Code formatted (`gofmt -w .`)
 - [ ] No debugging code left in
-- [ ] No commented-out code
+- [ ] Decimal.Decimal used for all currency
 - [ ] Documentation updated
 - [ ] CLAUDE.md updated if patterns changed
 
 ---
 
-## Technology Stack (To Be Determined)
-
-### Backend Options
-- **Node.js/TypeScript**: Fast development, good ecosystem
-- **Python**: Excellent for financial calculations, pandas for reporting
-- **Go**: High performance, good for concurrent operations
-- **Java**: Enterprise-ready, robust type system
-
-### Database Options
-- **PostgreSQL**: ACID compliance, JSON support, excellent for financial data
-- **SQLite**: Lightweight, good for personal use
-- **MySQL**: Wide adoption, good performance
-
-### Frontend Options
-- **React**: Component-based, large ecosystem
-- **Vue.js**: Simpler learning curve, good for smaller apps
-- **Svelte**: High performance, minimal boilerplate
-
----
-
 ## Useful Resources
+
+### Credit Card Industry References
+- GAAP accounting standards for revolving credit
+- Truth in Lending Act (TILA) requirements
+- Average Daily Balance calculation methodology
+- Credit card statement requirements
 
 ### Accounting References
 - Plain Text Accounting: https://plaintextaccounting.org/
-- Ledger CLI: https://www.ledger-cli.org/
-- hledger: https://hledger.org/
-- Accounting basics: Double-entry bookkeeping principles
+- Double-entry bookkeeping principles
+- Event sourcing patterns
 
-### Best Practices
-- Financial data handling best practices
-- Currency and decimal handling
-- Date/time handling in financial systems
-- Audit logging patterns
+### Go Best Practices
+- Effective Go: https://golang.org/doc/effective_go
+- Go Code Review Comments
+- Decimal arithmetic in Go
 
 ---
 
 ## Change Log
 
+### 2025-12-03
+- Updated CLAUDE.md with comprehensive credit card and rewards documentation
+- Added detailed explanation of revolving credit ledger
+- Added cashback/rewards points ledger documentation
+- Added credit card specific guidelines and pitfalls
+
 ### 2025-11-15
 - Initial CLAUDE.md creation
 - Established base structure and conventions
-- Defined development workflows
 
 ---
 
